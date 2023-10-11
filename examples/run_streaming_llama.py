@@ -1,18 +1,17 @@
-import warnings
-
-warnings.filterwarnings("ignore")
-
-import torch
 import argparse
 import json
 import os
-import time
 import re
 import sys
+import time
+import warnings
 
-from tqdm import tqdm
-from streaming_llm.utils import load, download_url, load_jsonl
+import torch
 from streaming_llm.enable_streaming_llm import enable_streaming_llm
+from streaming_llm.utils import download_url, load, load_jsonl, load_with_awq
+from tqdm import tqdm
+
+warnings.filterwarnings("ignore")
 
 
 @torch.no_grad()
@@ -58,13 +57,15 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len):
 
 
 @torch.no_grad()
-def streaming_inference(model, tokenizer, prompts, kv_cache=None, max_gen_len=1000):
+def streaming_inference(
+    model, tokenizer, prompts, kv_cache=None, max_gen_len=1000, device=None
+):
     past_key_values = None
     for idx, prompt in enumerate(prompts):
         prompt = "USER: " + prompt + "\n\nASSISTANT: "
         print("\n" + prompt, end="")
         input_ids = tokenizer(prompt, return_tensors="pt").input_ids
-        input_ids = input_ids.to(model.device)
+        input_ids = input_ids.to(device)
         seq_len = input_ids.shape[1]
         if kv_cache is not None:
             space_needed = seq_len + max_gen_len
@@ -77,7 +78,8 @@ def streaming_inference(model, tokenizer, prompts, kv_cache=None, max_gen_len=10
 
 def main(args):
     model_name_or_path = args.model_name_or_path
-    model, tokenizer = load(model_name_or_path)
+    model, tokenizer = load_with_awq(model_name_or_path, awq=args.awq)
+    # model, tokenizer = load(model_name_or_path)
     test_filepath = os.path.join(args.data_root, "mt_bench.jsonl")
     print(f"Loading data from {test_filepath} ...")
 
@@ -100,12 +102,7 @@ def main(args):
     else:
         kv_cache = None
 
-    streaming_inference(
-        model,
-        tokenizer,
-        prompts,
-        kv_cache,
-    )
+    streaming_inference(model, tokenizer, prompts, kv_cache, device=args.device)
 
 
 if __name__ == "__main__":
@@ -113,6 +110,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name_or_path", type=str, default="lmsys/vicuna-13b-v1.3"
     )
+    parser.add_argument("--device", type=str)
+    parser.add_argument("--awq", action="store_true")
     parser.add_argument("--data_root", type=str, default="data/")
     parser.add_argument("--enable_streaming", action="store_true")
     parser.add_argument("--start_size", type=int, default=4)
